@@ -77,6 +77,9 @@ public class NBJavacBuild extends BaseProject {
     private final String jdkTag;
     /** Clone URL for the pinned JDK, from jdk.properties. */
     private final String jdkUrl;
+    /** Release version: the pinned tag, plus a revision suffix for
+     * re-releases of the same tag. */
+    private final String releaseVersion;
 
     public NBJavacBuild() {
         pkg = "nbjavac";
@@ -96,22 +99,17 @@ public class NBJavacBuild extends BaseProject {
         // The version pins live in jdk.properties so CI can key its JDK
         // cache on that file (plus the patches and hint) without
         // invalidating the cache when this build script changes.
-        Properties pins = loadPins(root.resolve("jdk.properties"));
+        Properties pins = loadProps(root.resolve("jdk.properties"));
         jdkTag = pins.getProperty("jdk.git.commit");
         jdkUrl = pins.getProperty("jdk.git.url");
         if (jdkTag == null || jdkUrl == null) {
             throw new IllegalStateException("Missing jdk.git.commit/jdk.git.url in jdk.properties");
         }
-    }
 
-    private static Properties loadPins(Path f) {
-        Properties p = new Properties();
-        try (InputStream in = Files.newInputStream(f)) {
-            p.load(in);
-        } catch (IOException e) {
-            throw new UncheckedIOException("Cannot read version pins from " + f, e);
-        }
-        return p;
+        // Release revision for the pinned tag. Kept out of jdk.properties
+        // on purpose: bumping it must not invalidate the CI JDK build cache.
+        Properties props = loadProps(root.resolve("build.properties"));
+        releaseVersion = tagWithRevision(jdkTag, props.getProperty("revision"));
     }
 
     // ---------------------------------------------------------------- commands
@@ -409,7 +407,7 @@ public class NBJavacBuild extends BaseProject {
         Files.createDirectories(distDir);
 
         Path classes = buildDir.resolve("classes");
-        String ver = jdkTag;
+        String ver = releaseVersion;
         try (JarOutputStream z = new JarOutputStream(Files.newOutputStream(distDir.resolve("nb-javac-" + ver + "-api.jar")))) {
             writeManifest(z);
             addMatching(z, classes, NBJavacBuild::apiEntry);
@@ -456,9 +454,9 @@ public class NBJavacBuild extends BaseProject {
     }
 
     /** The Maven pom for the Central upload: the resources/nb-javac.pom
-     * template with @version@ replaced by the jdk tag. */
+     * template with @version@ replaced by the release version. */
     private void buildPom() throws IOException {
-        String pom = Files.readString(root.resolve("resources/nb-javac.pom")).replace("@version@", jdkTag);
+        String pom = Files.readString(root.resolve("resources/nb-javac.pom")).replace("@version@", releaseVersion);
         Files.writeString(pomFile(), pom);
     }
 
@@ -542,23 +540,51 @@ public class NBJavacBuild extends BaseProject {
     }
 
     private Path mainJar() {
-        return distDir.resolve("nb-javac-" + jdkTag + ".jar");
+        return distDir.resolve("nb-javac-" + releaseVersion + ".jar");
     }
 
     private Path apiJar() {
-        return distDir.resolve("nb-javac-" + jdkTag + "-api.jar");
+        return distDir.resolve("nb-javac-" + releaseVersion + "-api.jar");
     }
 
     private Path sourcesJar() {
-        return distDir.resolve("nb-javac-" + jdkTag + "-sources.jar");
+        return distDir.resolve("nb-javac-" + releaseVersion + "-sources.jar");
     }
 
     private Path javadocJar() {
-        return distDir.resolve("nb-javac-" + jdkTag + "-javadoc.jar");
+        return distDir.resolve("nb-javac-" + releaseVersion + "-javadoc.jar");
     }
 
     private Path pomFile() {
-        return distDir.resolve("nb-javac-" + jdkTag + ".pom");
+        return distDir.resolve("nb-javac-" + releaseVersion + ".pom");
+    }
+
+    private static Properties loadProps(Path f) {
+        Properties p = new Properties();
+        try (InputStream in = Files.newInputStream(f)) {
+            p.load(in);
+        } catch (IOException e) {
+            throw new UncheckedIOException("Cannot read build properties from " + f, e);
+        }
+        return p;
+    }
+
+    /** The release version for a pinned tag: the tag itself, or the tag
+     * with a revision suffix appended for re-releases of the same tag. */
+    private static String tagWithRevision(String tag, String raw) {
+        if (raw == null) {
+            throw new IllegalStateException("Missing 'revision' in build.properties");
+        }
+        int revision;
+        try {
+            revision = Integer.parseInt(raw);
+        } catch (NumberFormatException e) {
+            throw new IllegalStateException("Invalid 'revision' in build.properties: " + raw);
+        }
+        if (revision < 0) {
+            throw new IllegalStateException("Negative 'revision' in build.properties: " + raw);
+        }
+        return revision == 0 ? tag : tag + "." + revision;
     }
 
     private static String classPath(Path... paths) {

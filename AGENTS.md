@@ -18,7 +18,8 @@ overview.
   the Jackpot hint file first; the git patches in `patches/` are the last
   resort for what Jackpot cannot express.
 - `test/` is the backported javac test suite. `nbjavac/NBJavacBuild.java`
-  is the entire build (rife bld).
+  is the entire build (rife bld); `build.properties` holds its non-pin
+  properties (the release revision).
 - `lib/*` jars are fetched by the build; only the bld wrapper is tracked.
 - `old/` is an untracked scratch area — don't touch it.
 
@@ -54,6 +55,8 @@ of `jdk.properties`, **every file in `patches/`**, and
 `src/META-INF/upgrade/nbjavac.hint`. Changing any of them (adding, editing or
 removing a patch) invalidates the cached build — a CI miss means a full JDK
 rebuild, so don't edit these casually (e.g. to fix whitespace).
+`build.properties` is deliberately not part of the key: bumping the release
+revision must not rebuild the JDK.
 
 ## CI — `.github/workflows/main.yml`
 
