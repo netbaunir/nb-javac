@@ -22,6 +22,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Properties;
 import java.util.function.Predicate;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 import java.util.jar.Attributes;
@@ -30,6 +31,7 @@ import java.util.jar.JarOutputStream;
 import java.util.jar.Manifest;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
+import java.util.zip.ZipOutputStream;
 
 import static java.nio.charset.StandardCharsets.ISO_8859_1;
 import static java.nio.charset.StandardCharsets.UTF_8;
@@ -45,6 +47,8 @@ import static java.nio.charset.StandardCharsets.UTF_8;
 ///
 /// - `./bld jdk` - clone and build the pinned JDK (`jdk.git.commit` in `jdk.properties`)
 /// - `./bld jar` - build the API and implementation JARs using the pinned JDK
+/// - `./bld sign` - GPG-sign the release files in `dist/` (`-Dgpg.key` selects the key)
+/// - `./bld zip` - package `dist/` into the Central portal upload zip
 /// - `./bld test` - build the JARs, then run the test suite under the current JVM
 /// - `./bld clean` - remove all build products
 /// - `./bld cleanAll` - clean and remove the JDK clone and image for a rebuild from scratch
@@ -148,6 +152,53 @@ public class NBJavacBuild extends BaseProject {
         runtimePayload();
         compileMain();
         buildJars();
+    }
+
+    @BuildCommand(summary = "GPG-sign the release files in dist/ (-Dgpg.key selects the key)")
+    public void sign() throws Exception {
+        // -Dgpg.key selects the signing key, the default key otherwise.
+        String key = System.getProperty("gpg.key");
+        List<String> gpg = new ArrayList<>(List.of("gpg"));
+        if (key != null && !key.isEmpty()) {
+            gpg.add("--local-user");
+            gpg.add(key);
+        }
+        for (Path file : releaseFiles()) {
+            if (Files.notExists(file)) {
+                throw new IOException("Missing " + file.getFileName() + ", run: ./bld jar");
+            }
+            // Batch mode: a passphrase-protected key must allow loopback pinentry.
+            List<String> sign = new ArrayList<>(gpg);
+            sign.addAll(List.of("--batch", "--yes", "--armor", "--detach-sign", file.getFileName().toString()));
+            exec(distDir, sign.toArray(String[]::new));
+            Path asc = file.resolveSibling(file.getFileName() + ".asc");
+            exec(distDir, "gpg", "--batch", "--verify", asc.getFileName().toString(), file.getFileName().toString());
+        }
+    }
+
+    @BuildCommand(summary = "Package dist/ into the Central portal upload zip")
+    public void zip() throws Exception {
+        for (Path file : releaseFiles()) {
+            if (Files.notExists(file)) {
+                throw new IOException("Missing " + file.getFileName() + ", run: ./bld jar");
+            }
+            if (Files.notExists(file.resolveSibling(file.getFileName() + ".asc"))) {
+                throw new IOException("Missing " + file.getFileName() + ".asc, run: ./bld sign");
+            }
+        }
+        String prefix = pomCoordinate("groupId").replace('.', '/') + "/" + pomCoordinate("artifactId") + "/" + releaseVersion + "/";
+        Path zip = distDir.resolve("nb-javac-" + releaseVersion + "-upload.zip");
+        Files.deleteIfExists(zip);
+        try (ZipOutputStream z = new ZipOutputStream(Files.newOutputStream(zip))) {
+            try (Stream<Path> s = Files.list(distDir)) {
+                for (Path f : s.filter(Files::isRegularFile).filter(p -> !p.equals(zip)).sorted().toList()) {
+                    z.putNextEntry(new ZipEntry(prefix + f.getFileName()));
+                    Files.copy(f, z);
+                    z.closeEntry();
+                }
+            }
+        }
+        System.out.println("Upload zip: " + zip);
     }
 
     @Override
@@ -461,22 +512,27 @@ public class NBJavacBuild extends BaseProject {
     }
 
     /** Maven-repo-style checksum files (bare hash, no filename, no newline —
-     * Central's convention) next to every dist jar. Central requires .md5 and
-     * .sha1; .sha256 is the supported modern one. Reproducible: the jars are,
-     * so these are too. */
+     * Central's convention) next to every release file. Central requires
+     * .md5 and .sha1; .sha256 is the supported modern one. Reproducible:
+     * the files are, so these are too. */
     private void checksums() throws Exception {
-        for (Path jar : List.of(apiJar(), mainJar(), sourcesJar(), javadocJar(), pomFile())) {
-            for (String alg : List.of("MD5", "SHA-1", "SHA-256")) {
-                MessageDigest md = MessageDigest.getInstance(alg);
-                byte[] digest = md.digest(Files.readAllBytes(jar));
-                StringBuilder hex = new StringBuilder(digest.length * 2);
-                for (byte b : digest) {
-                    hex.append("%02x".formatted(b));
-                }
-                Files.writeString(
-                        jar.resolveSibling(jar.getFileName() + "." + alg.toLowerCase().replace("-", "")),
-                        hex.toString());
+        for (Path file : releaseFiles()) {
+            writeChecksums(file);
+        }
+    }
+
+    private void writeChecksums(Path file) throws Exception {
+        for (String alg : List.of("MD5", "SHA-1", "SHA-256")) {
+            MessageDigest md = MessageDigest.getInstance(alg);
+            byte[] digest = md.digest(Files.readAllBytes(file));
+            StringBuilder hex = new StringBuilder(digest.length * 2);
+            for (byte b : digest) {
+                hex.append("%02x".formatted(b));
             }
+            Files.writeString(
+                    file.resolveSibling(file.getFileName() + "." + alg.toLowerCase().replace("-", "")),
+                    hex.toString()
+            );
         }
     }
 
@@ -539,6 +595,11 @@ public class NBJavacBuild extends BaseProject {
         return System.getProperty("java.home") + "/bin/java";
     }
 
+    /** The release files as published to Central. */
+    private List<Path> releaseFiles() {
+        return List.of(mainJar(), apiJar(), sourcesJar(), javadocJar(), pomFile());
+    }
+
     private Path mainJar() {
         return distDir.resolve("nb-javac-" + releaseVersion + ".jar");
     }
@@ -585,6 +646,16 @@ public class NBJavacBuild extends BaseProject {
             throw new IllegalStateException("Negative 'revision' in build.properties: " + raw);
         }
         return revision == 0 ? tag : tag + "." + revision;
+    }
+
+    /** A top-level GAV element from the pom template. */
+    private String pomCoordinate(String tag) throws IOException {
+        String pom = Files.readString(root.resolve("resources/nb-javac.pom"));
+        Matcher m = Pattern.compile("<" + tag + ">(.*?)</" + tag + ">").matcher(pom);
+        if (!m.find()) {
+            throw new IllegalStateException("No <" + tag + "> in the pom template");
+        }
+        return m.group(1).strip();
     }
 
     private static String classPath(Path... paths) {

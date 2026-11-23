@@ -27,7 +27,9 @@ overview.
 
 ```
 ./bld jdk    # first time only: clone + build the pinned JDK (slow, ~12 m)
-./bld jar    # -> dist/nb-javac-<jdk-tag>.jar / -api.jar
+./bld jar    # -> dist/nb-javac-<version>.jar / -api.jar
+./bld sign   # GPG-sign the release files (-Dgpg.key selects the key)
+./bld zip    # -> the portal upload zip (Maven repo layout, all of dist/)
 ./bld test   # builds the jars, runs the suite in the current JVM
 ```
 

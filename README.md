@@ -13,8 +13,13 @@ tooling).
 
 ```
 $ ./bld jdk    # first time only: clone + build the pinned JDK
-$ ./bld jar    # -> dist/nb-javac-<jdk-tag>.jar / -api.jar
+$ ./bld jar    # -> dist/nb-javac-<version>.jar / -api.jar
 $ ./bld test   # builds the jars, then runs the test suite
+```
+
+```
+$ ./bld sign   # GPG-sign the release files in dist/ (-Dgpg.key selects the key)
+$ ./bld zip    # package dist/ into the Central portal upload zip
 ```
 
 ```
