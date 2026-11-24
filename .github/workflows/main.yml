@@ -1,8 +1,35 @@
 name: nb-javac
 
-on: [push]
-#  push:
-#    branches: [ master ]
+on:
+  push:
+    branches:
+      - 'main'
+  workflow_dispatch:
+
+  pull_request:
+    # unlocked event is used as super secret restart button
+    types: [opened, synchronize, unlocked]
+
+concurrency: 
+  group: ${{ github.head_ref || github.run_id }}-${{ github.base_ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+env:
+
+  # default java distribution used by the setup-java action across jobs
+  # see https://github.com/actions/setup-java#supported-distributions
+  # CI requirements:
+  #  - timely GA releases (no delays if possible)
+  #  - EA builds must be available for the upcoming release (note: some vendors skip builds)
+  #  - reliable / no extra sauce
+  DEFAULT_JAVA_DISTRIBUTION: 'temurin'
+#  DEFAULT_JAVA_DISTRIBUTION: 'sapmachine'
+#  DEFAULT_JAVA_DISTRIBUTION: 'zulu'
+
 jobs: 
   base: 
     name: "nb-javac build and test"
@@ -21,7 +48,7 @@ jobs:
       - name: Set up JDK 27
         uses: actions/setup-java@v6
         with:
-            distribution: 'zulu'
+            distribution: ${{ env.DEFAULT_JAVA_DISTRIBUTION }}
             java-version: 27
             problem-matcher: false
 
@@ -73,7 +100,7 @@ jobs:
       - name: Set up JDK 21
         uses: actions/setup-java@v6
         with:
-            distribution: 'zulu'
+            distribution: ${{ env.DEFAULT_JAVA_DISTRIBUTION }}
             java-version: 21
             problem-matcher: false
       - name: Test on JDK 21
@@ -82,7 +109,7 @@ jobs:
       - name: Set up JDK 25
         uses: actions/setup-java@v6
         with:
-            distribution: 'zulu'
+            distribution: ${{ env.DEFAULT_JAVA_DISTRIBUTION }}
             java-version: 25
             problem-matcher: false
       - name: Test on JDK 25
@@ -91,7 +118,7 @@ jobs:
       - name: Set up JDK 28
         uses: actions/setup-java@v6
         with:
-            distribution: 'zulu'
+            distribution: ${{ env.DEFAULT_JAVA_DISTRIBUTION }}
             java-version: 28-ea
             problem-matcher: false
       - name: Test on JDK 28
@@ -117,7 +144,7 @@ jobs:
       - name: Set up JDK 27
         uses: actions/setup-java@v6
         with:
-            distribution: 'temurin'
+            distribution: ${{ env.DEFAULT_JAVA_DISTRIBUTION }}
             java-version: 27
             problem-matcher: false
 
@@ -149,7 +176,7 @@ jobs:
       - name: Set up JDK 21
         uses: actions/setup-java@v6
         with:
-            distribution: 'temurin'
+            distribution: ${{ env.DEFAULT_JAVA_DISTRIBUTION }}
             java-version: 21
             problem-matcher: false
 
