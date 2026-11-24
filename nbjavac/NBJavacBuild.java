@@ -509,7 +509,6 @@ public class NBJavacBuild extends BaseProject {
             writeManifest(z);
             addMatching(z, src, p -> p.endsWith(".java"));
             addMatching(z, jdkSrc, p -> p.endsWith(".java"));
-            addMatching(z, jdk.resolve("make/langtools"), p -> p.endsWith(".java"));
             addDoc(z, "README.md");
             addDoc(z, "LICENSE.txt");
         }
